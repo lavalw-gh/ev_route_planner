@@ -4,12 +4,12 @@
 <!--
   Version 5.5 changes:
   - Green start, orange charging stop, blue non-charging leg end, and chequered final flags.
-  - Saved JSON filenames always use one EV-Charger- prefix.
+  - Saved JSON filenames always use one EV-Planner- prefix.
 
   Previous version 4.4 changes:
   - Added draggable route shaping points with strict 25 m road snapping and immediate rerouting on release.
   - Persisted shaping points across recalculation and saved routes; double-clicking a point removes it.
-  - Added warnings when a recalculated leg introduces tolls, ferries, or restricted-access roads.
+  - Added warnings when a recalculated leg introduces tolls, ferries, or restricted-access roads.charrger
   - Reworked repeated-place flags so the second pass points in the opposite direction.
   - Numbered disconnected leg starts and linked them to the preceding endpoint with a dashed continuation line.
 -->
@@ -629,10 +629,10 @@ function refreshMap({fit=true}={}){
   if(fit&&bounds.length)app.map.fitBounds(bounds,{padding:[30,30]});
 }
 // 4.4: shaping points and route metadata are first-class saved-route data.
-// 5.5: add the EV-Charger- prefix once and keep a single JSON extension.
+// 5.5: add the EV-Planner- prefix once and keep a single JSON extension.
 function routeSaveFilename(inputName){
   const stem=String(inputName||'').trim().replace(/\.json$/i,'')||`ev-route-${new Date().toISOString().slice(0,19).replace(/[T:]/g,'-')}`;
-  return `${/^EV-Charger-/i.test(stem)?stem:`EV-Charger-${stem}`}.json`;
+  return `${/^EV-Planner-/i.test(stem)?stem:`EV-Planner-${stem}`}.json`;
 }
 function exportRoute(){
   const payload={version:'5.5',savedAt:new Date().toISOString(),settings:{evRange:document.getElementById('evRange').value,useMapTiler:document.getElementById('useMapTiler').checked,avoidTolls:document.getElementById('avoidTolls').checked,avoidFerries:document.getElementById('avoidFerries').checked,routePreference:routePreference(),showAlternatives:document.getElementById('showAlternatives').checked,notes:document.getElementById('routeNotes').value},rows:app.rows.map(r=>({start:r.start,end:r.end,charging:r.charging,chargeAdded:r.charging?r.chargeAdded:'',miles:r.miles,duration:r.duration,startTime:r.startTime,endTime:r.endTime,batteryStart:r.batteryStart,usage:r.usage,batteryEnd:r.batteryEnd,startResolved:r.startResolved,endResolved:r.endResolved,geometry:r.geometry,startSnapM:r.startSnapM,endSnapM:r.endSnapM,startSnapPoint:r.startSnapPoint,endSnapPoint:r.endSnapPoint,viaPoints:r.viaPoints,routeWayPoints:r.routeWayPoints,routeRestrictions:r.routeRestrictions,routeWarnings:r.routeWarnings}))};
