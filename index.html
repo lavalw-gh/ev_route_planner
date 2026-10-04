@@ -2,19 +2,24 @@
 <html lang="en" data-theme="light">
 <head>
 <!--
-  Version 5.5 changes:
+  Version 5.6 changes:
+  - Added a shared alternatives minimap with coloured, numbered routes and matching selection buttons.
+  - Hover/focus previews highlight routes; map clicks preview a route before explicit selection.
+  - Preview maps are cleaned up on selection/cancellation and reuse returned route geometry.
+
+  Previous version 5.5 changes:
   - Green start, orange charging stop, blue non-charging leg end, and chequered final flags.
-  - Saved JSON filenames always use one EV-Planner- prefix.
+  - Saved JSON filenames always use one EV-Charger- prefix.
 
   Previous version 4.4 changes:
   - Added draggable route shaping points with strict 25 m road snapping and immediate rerouting on release.
   - Persisted shaping points across recalculation and saved routes; double-clicking a point removes it.
-  - Added warnings when a recalculated leg introduces tolls, ferries, or restricted-access roads.charrger
+  - Added warnings when a recalculated leg introduces tolls, ferries, or restricted-access roads.
   - Reworked repeated-place flags so the second pass points in the opposite direction.
   - Numbered disconnected leg starts and linked them to the preceding endpoint with a dashed continuation line.
 -->
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>EV Route Planner 5.5 | Smart Route & Charging Optimizer</title>
+<title>EV Route Planner 5.6 | Smart Route & Charging Optimizer</title>
 <link href="https://api.fontshare.com/v2/css?f[]=general-sans@400,500,600,700&f[]=cabinet-grotesk@500,700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
 <style>
@@ -31,6 +36,8 @@
 @media (min-width:1921px){.app{max-width:none;grid-template-columns:792px minmax(0,1fr)}}@media (max-width:1200px){.app{grid-template-columns:1fr}.right{position:relative;height:auto}.input-panel-toggle{display:none}}@media (max-width:900px){.sum{grid-template-columns:1fr 1fr}}@media (max-width:640px){.app{padding:12px}.left,.right{padding:14px}.grid,.sum{grid-template-columns:1fr}.hero{flex-direction:column}.route-zone{min-height:420px}.route-zone-title .mini{display:none}#routeTable tr{grid-template-columns:repeat(12,minmax(0,1fr))}#routeTable th:nth-child(1),#routeTable td:nth-child(1){grid-column:span 1}#routeTable th:nth-child(2),#routeTable td:nth-child(2){grid-column:span 11}#routeTable th:nth-child(3),#routeTable td:nth-child(3){grid-column:span 12}#routeTable th:nth-child(n+4):nth-child(-n+12),#routeTable td:nth-child(n+4):nth-child(-n+12){grid-column:span 3}#routeTable th:nth-child(13),#routeTable td:nth-child(13){grid-column:span 12}#mapFullscreenHost{padding:8px}#mapFullscreenHost #map{height:calc(100vh - 16px);min-height:calc(100vh - 16px);border-radius:18px}.map-max-btn{top:10px;right:10px}}
 /* 5.5: matching black-and-white chequered finish flags on the map and legend. */
 .journey-flag.is-chequered .journey-flag__cloth,.legend-flag.is-chequered::before{background-color:#fff;background-image:conic-gradient(#222 25%,#fff 0 50%,#222 0 75%,#fff 0);background-size:8px 8px}.journey-flag.is-chequered .journey-flag__number{background:rgba(0,0,0,.6);border-radius:2px}
+/* 5.6: responsive alternatives comparison map and matching numbered choices. */
+#routeOptionsModal .box{width:min(1000px,96vw)}#routeOptionsMap{height:clamp(240px,40vh,440px);width:100%;border-radius:16px;background:var(--s2)}#routeOptionsList{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:12px}#routeOptionsList .opt{margin:0;width:100%;border-left:5px solid var(--route-color)}#routeOptionsList .opt.is-previewed{background:var(--pri2);outline:2px solid var(--route-color);outline-offset:1px}.alternative-number{display:inline-grid;place-items:center;background:var(--route-color);color:#fff;border:2px solid #fff;border-radius:999px;width:26px;height:26px;font:700 12px/1 var(--body);box-shadow:0 2px 5px #0005}.alternative-route-label{background:var(--s);color:var(--tx);border:2px solid var(--route-color);font-weight:700}.route-preview-note{margin:8px 0 0}
 </style>
 </head>
 <body>
@@ -38,7 +45,7 @@
   <section class="panel left" id="inputPanel">
     <div class="hero">
       <div>
-        <h1>EV Route Planner 5.5</h1>
+        <h1>EV Route Planner 5.6</h1>
         <div class="mut">Car route and charging planner with ORS routing, independent road restrictions, route alternatives, and adjustable access points.</div>
       </div>
       <button class="theme" id="themeBtn" aria-label="Toggle theme">◐</button>
@@ -163,6 +170,8 @@
       </div>
       <button class="btn ghost" id="cancelRouteOptions" type="button">Cancel calculation</button>
     </div>
+    <div id="routeOptionsMap" aria-label="Map comparing route alternatives"></div>
+    <div class="mini route-preview-note">Hover or focus a route option to highlight it. Click a route on the map to preview it, then choose its matching Use route button.</div>
     <div id="routeOptionsList"></div>
     <div class="mini" style="margin-top:12px">Only the selected route will be plotted and used for the journey calculations.</div>
   </div>
@@ -365,21 +374,55 @@ document.getElementById('closeModal').onclick=closePicker;
 document.getElementById('displayCandidates').onclick=openCandidateMap;
 document.getElementById('closeCandidateMap').onclick=()=>closeCandidateMap();
 document.getElementById('candidateMapModal').onclick=e=>{if(e.target.id==='candidateMapModal')closeCandidateMap()};
-function closeRouteOptions(error=new Error('Route selection cancelled')){const modal=document.getElementById('routeOptionsModal'),pending=app.routeChoicePending;modal.classList.remove('open');modal.setAttribute('aria-hidden','true');app.routeChoicePending=null;if(pending?.reject)pending.reject(error)}
-function chooseRouteOption(route){const pending=app.routeChoicePending,modal=document.getElementById('routeOptionsModal');modal.classList.remove('open');modal.setAttribute('aria-hidden','true');app.routeChoicePending=null;if(pending?.resolve)pending.resolve(route)}
+// 5.6: the preview belongs to this chooser only; release Leaflet resources on every exit.
+function disposeRouteOptionsMap(){if(app.routeOptionsMap)app.routeOptionsMap.remove();app.routeOptionsMap=null;app.routeOptionsLayers=[];app.routeOptionsButtons=[]}
+function closeRouteOptions(error=new Error('Route selection cancelled')){const modal=document.getElementById('routeOptionsModal'),pending=app.routeChoicePending;modal.classList.remove('open');modal.setAttribute('aria-hidden','true');app.routeChoicePending=null;disposeRouteOptionsMap();if(pending?.reject)pending.reject(error)}
+function chooseRouteOption(route){const pending=app.routeChoicePending,modal=document.getElementById('routeOptionsModal');modal.classList.remove('open');modal.setAttribute('aria-hidden','true');app.routeChoicePending=null;disposeRouteOptionsMap();if(pending?.resolve)pending.resolve(route)}
+const ALTERNATIVE_ROUTE_COLORS=['#2563eb','#d97706','#9333ea','#059669','#dc2626'];
+function highlightRouteOption(index=null){
+  (app.routeOptionsLayers||[]).forEach((layer,routeIndex)=>{const selected=routeIndex===index;layer.setStyle({weight:selected?8:5,opacity:(index==null||selected)?0.9:0.35});if(selected)layer.bringToFront()});
+  (app.routeOptionsButtons||[]).forEach((button,routeIndex)=>button.classList.toggle('is-previewed',routeIndex===index));
+}
+function createRouteOptionsMap(routes,pending){
+  // No additional directions calls: every preview uses the alternatives already returned.
+  if(app.routeChoicePending!==pending)return;
+  try{
+    app.routeOptionsMap=L.map('routeOptionsMap',{scrollWheelZoom:false});createBaseLayer().addTo(app.routeOptionsMap);
+    L.control.scale({imperial:true,metric:true,maxWidth:100}).addTo(app.routeOptionsMap);
+    const bounds=L.latLngBounds([]);app.routeOptionsLayers=[];
+    routes.forEach((route,index)=>{
+      const color=ALTERNATIVE_ROUTE_COLORS[index%ALTERNATIVE_ROUTE_COLORS.length];
+      const layer=L.geoJSON(route.geometry,{style:{color,weight:5,opacity:.9}}).addTo(app.routeOptionsMap);
+      layer.on('mouseover',()=>highlightRouteOption(index));layer.on('mouseout',()=>highlightRouteOption());
+      layer.on('click',()=>{highlightRouteOption(index);app.routeOptionsButtons[index]?.focus()});
+      app.routeOptionsLayers.push(layer);const routeBounds=layer.getBounds();if(routeBounds.isValid())bounds.extend(routeBounds);
+      const coordinates=flattenGeometryCoordinates(route.geometry);
+      if(coordinates.length){
+        // Spread labels along the routes so alternatives sharing a corridor remain identifiable.
+        const fraction=(index+1)/(routes.length+1),coordinate=coordinates[Math.min(coordinates.length-1,Math.floor(coordinates.length*fraction))];
+        const marker=L.marker([coordinate[1],coordinate[0]],{icon:L.divIcon({className:'',html:`<span class="alternative-number" style="--route-color:${color}">${index+1}</span>`,iconSize:[26,26],iconAnchor:[13,13]}),title:`Route ${index+1}`}).addTo(app.routeOptionsMap);
+        marker.bindTooltip(`Route ${index+1}`,{permanent:true,direction:'top',className:'alternative-route-label'});
+        marker.on('click',()=>{highlightRouteOption(index);app.routeOptionsButtons[index]?.focus()});
+      }
+    });
+    app.routeOptionsMap.invalidateSize();if(bounds.isValid())app.routeOptionsMap.fitBounds(bounds,{padding:[32,40],maxZoom:16});else app.routeOptionsMap.setView([54.5,-3],5);
+  }catch(error){disposeRouteOptionsMap();document.getElementById('routeOptionsMap').textContent='Map preview unavailable. You can still choose a route using its distance and duration.'}
+}
 function openRouteOptions(routes,legNumber){
+  if(app.routeChoicePending)closeRouteOptions();else disposeRouteOptionsMap();
   const modal=document.getElementById('routeOptionsModal'),list=document.getElementById('routeOptionsList');
   document.getElementById('routeOptionsTitle').textContent=`Select route for leg ${legNumber}`;
-  list.innerHTML='';
+  list.innerHTML='';document.getElementById('routeOptionsMap').textContent='';app.routeOptionsButtons=[];
   routes.forEach((route,index)=>{
     const option=document.createElement('button');
-    option.type='button';option.className='opt';
-    option.innerHTML=`<span class="route-option-title"><strong>${index===0?'Primary route':`Alternative ${index}`}</strong><span class="route-option-metrics"><span>${escapeHtml(fmt(route.miles))} miles</span><span>${escapeHtml(minsToDur(Math.round(route.durationMin)))}</span></span></span><span class="btn pri">Use route</span>`;
+    option.type='button';option.className='opt';option.style.setProperty('--route-color',ALTERNATIVE_ROUTE_COLORS[index%ALTERNATIVE_ROUTE_COLORS.length]);
+    option.innerHTML=`<span class="route-option-title"><strong><span class="alternative-number">${index+1}</span> Route ${index+1}${index===0?' · primary':''}</strong><span class="route-option-metrics"><span>${escapeHtml(fmt(route.miles))} miles</span><span>${escapeHtml(minsToDur(Math.round(route.durationMin)))}</span></span></span><span class="btn pri">Use route</span>`;
+    option.onmouseenter=option.onfocus=()=>highlightRouteOption(index);option.onmouseleave=option.onblur=()=>highlightRouteOption();
     option.onclick=()=>chooseRouteOption(route);
-    list.appendChild(option);
+    list.appendChild(option);app.routeOptionsButtons.push(option);
   });
   modal.classList.add('open');modal.setAttribute('aria-hidden','false');
-  return new Promise((resolve,reject)=>{app.routeChoicePending={resolve,reject}});
+  return new Promise((resolve,reject)=>{const pending={resolve,reject};app.routeChoicePending=pending;requestAnimationFrame(()=>{createRouteOptionsMap(routes,pending);if(app.routeChoicePending===pending)app.routeOptionsButtons[0]?.focus()})});
 }
 document.getElementById('cancelRouteOptions').onclick=()=>closeRouteOptions();
 document.addEventListener('keydown',e=>{if(e.key!=='Escape')return;if(document.getElementById('routeOptionsModal').classList.contains('open'))closeRouteOptions();else if(document.getElementById('candidateMapModal').classList.contains('open'))closeCandidateMap();else if(document.getElementById('pickerModal').classList.contains('open'))closePicker()});
@@ -629,13 +672,13 @@ function refreshMap({fit=true}={}){
   if(fit&&bounds.length)app.map.fitBounds(bounds,{padding:[30,30]});
 }
 // 4.4: shaping points and route metadata are first-class saved-route data.
-// 5.5: add the EV-Planner- prefix once and keep a single JSON extension.
+// 5.5: add the EV-Charger- prefix once and keep a single JSON extension.
 function routeSaveFilename(inputName){
   const stem=String(inputName||'').trim().replace(/\.json$/i,'')||`ev-route-${new Date().toISOString().slice(0,19).replace(/[T:]/g,'-')}`;
-  return `${/^EV-Planner-/i.test(stem)?stem:`EV-Planner-${stem}`}.json`;
+  return `${/^EV-Charger-/i.test(stem)?stem:`EV-Charger-${stem}`}.json`;
 }
 function exportRoute(){
-  const payload={version:'5.5',savedAt:new Date().toISOString(),settings:{evRange:document.getElementById('evRange').value,useMapTiler:document.getElementById('useMapTiler').checked,avoidTolls:document.getElementById('avoidTolls').checked,avoidFerries:document.getElementById('avoidFerries').checked,routePreference:routePreference(),showAlternatives:document.getElementById('showAlternatives').checked,notes:document.getElementById('routeNotes').value},rows:app.rows.map(r=>({start:r.start,end:r.end,charging:r.charging,chargeAdded:r.charging?r.chargeAdded:'',miles:r.miles,duration:r.duration,startTime:r.startTime,endTime:r.endTime,batteryStart:r.batteryStart,usage:r.usage,batteryEnd:r.batteryEnd,startResolved:r.startResolved,endResolved:r.endResolved,geometry:r.geometry,startSnapM:r.startSnapM,endSnapM:r.endSnapM,startSnapPoint:r.startSnapPoint,endSnapPoint:r.endSnapPoint,viaPoints:r.viaPoints,routeWayPoints:r.routeWayPoints,routeRestrictions:r.routeRestrictions,routeWarnings:r.routeWarnings}))};
+  const payload={version:'5.6',savedAt:new Date().toISOString(),settings:{evRange:document.getElementById('evRange').value,useMapTiler:document.getElementById('useMapTiler').checked,avoidTolls:document.getElementById('avoidTolls').checked,avoidFerries:document.getElementById('avoidFerries').checked,routePreference:routePreference(),showAlternatives:document.getElementById('showAlternatives').checked,notes:document.getElementById('routeNotes').value},rows:app.rows.map(r=>({start:r.start,end:r.end,charging:r.charging,chargeAdded:r.charging?r.chargeAdded:'',miles:r.miles,duration:r.duration,startTime:r.startTime,endTime:r.endTime,batteryStart:r.batteryStart,usage:r.usage,batteryEnd:r.batteryEnd,startResolved:r.startResolved,endResolved:r.endResolved,geometry:r.geometry,startSnapM:r.startSnapM,endSnapM:r.endSnapM,startSnapPoint:r.startSnapPoint,endSnapPoint:r.endSnapPoint,viaPoints:r.viaPoints,routeWayPoints:r.routeWayPoints,routeRestrictions:r.routeRestrictions,routeWarnings:r.routeWarnings}))};
   const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}),a=document.createElement('a'),filename=routeSaveFilename(document.getElementById('saveFilename').value);
   a.href=URL.createObjectURL(blob);a.download=filename;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},0);setStatus('Route saved without API keys');
 }
