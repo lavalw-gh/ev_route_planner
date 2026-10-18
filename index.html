@@ -324,7 +324,36 @@ function bindDragAndDrop(){
 function handleAction(e){const{id,action}=e.currentTarget.dataset;if(action==='del')removeRow(id);if(action==='copy'){const r=app.rows.find(x=>x.id===id);app.rows.splice(app.rows.findIndex(x=>x.id===id)+1,0,createRow({...r,id:undefined}));render()}if(action==='swap')swapRowEndpoints(id)}
 function autoFillStarts(){app.rows.forEach((r,i)=>{if(!r.startTime){r.startTime=i===0?(r.startTime||'08:00'):(app.rows[i-1].endTime||app.rows[i-1].startTime||'08:00')}})}
 function parseUsage(s){if(s===''||s==null)return null;const n=parseFloat(String(s).replace('%',''));return Number.isFinite(n)?n:null}
-function recalcDisplayOnly(){const range=Math.max(1,parseFloat(document.getElementById('evRange').value)||150);let prevEnd=100,totalMiles=0,totalMins=0,totalChargeAdded=0;app.rows.forEach((r,i)=>{if(i===0&&r.batteryStart==='')r.batteryStart='100';if(i>0){const previous=app.rows[i-1],added=previous.charging?(parseFloat(previous.chargeAdded)||0):0;r.batteryStart=String(Math.round(clamp(prevEnd+added)*10)/10)}const bs=clamp(parseFloat(r.batteryStart)||0);let use=parseUsage(r.usage);if(r.miles!==''&&use==null){use=-((parseFloat(r.miles)||0)/range*100);r.usage=(Math.round(use*10)/10).toString()}const durM=parseDuration(r.duration);if(r.startTime&&durM!=null)r.endTime=toHHMM(toMin(r.startTime)+durM);const u=parseUsage(r.usage);const be=bs+(u||0);r.batteryEnd=`${Math.round(be*10)/10}%`;prevEnd=be;totalMiles+=parseFloat(r.miles)||0;totalMins+=durM||0;if(r.charging)totalChargeAdded+=parseFloat(r.chargeAdded)||0});document.getElementById('totalMiles').textContent=fmt(totalMiles);document.getElementById('totalDuration').textContent=minsToDur(totalMins);document.getElementById('totalCharging').textContent=`${Math.round(totalChargeAdded*10)/10}%`;document.getElementById('finalBattery').textContent=app.rows.length?app.rows[app.rows.length-1].batteryEnd:'100%'}
+function recalcDisplayOnly(){
+  const range=Math.max(1,parseFloat(document.getElementById('evRange').value)||150);
+  let prevEnd=100,totalMiles=0,totalMins=0,totalChargeAdded=0;
+  app.rows.forEach((r,i)=>{
+    if(i===0&&r.batteryStart==='')r.batteryStart='100';
+    if(i>0){
+      r.batteryStart=String(Math.round(prevEnd*10)/10);
+    }
+    const bs=Number.isFinite(parseFloat(r.batteryStart))?parseFloat(r.batteryStart):0;
+    let use=parseUsage(r.usage);
+    if(r.miles!==''&&use==null){
+      use=-((parseFloat(r.miles)||0)/range*100);
+      r.usage=(Math.round(use*10)/10).toString();
+    }
+    const durM=parseDuration(r.duration);
+    if(r.startTime&&durM!=null)r.endTime=toHHMM(toMin(r.startTime)+durM);
+    const u=parseUsage(r.usage)||0;
+    const added=r.charging?(parseFloat(r.chargeAdded)||0):0;
+    const be=bs+u+(added>0?added:0);
+    r.batteryEnd=`${Math.round(be*10)/10}%`;
+    prevEnd=be;
+    totalMiles+=parseFloat(r.miles)||0;
+    totalMins+=durM||0;
+    if(r.charging&&added>0)totalChargeAdded+=added;
+  });
+  document.getElementById('totalMiles').textContent=fmt(totalMiles);
+  document.getElementById('totalDuration').textContent=minsToDur(totalMins);
+  document.getElementById('totalCharging').textContent=`${Math.round(totalChargeAdded*10)/10}%`;
+  document.getElementById('finalBattery').textContent=app.rows.length?app.rows[app.rows.length-1].batteryEnd:'100%';
+}
 function parseDuration(s){if(!s)return null;const m=String(s).match(/^(\d{1,2}):(\d{2})$/);if(!m)return null;return parseInt(m[1],10)*60+parseInt(m[2],10)}
 async function fetchJson(url,options,label){
   let r;
@@ -485,11 +514,21 @@ function recalculateJourneyFrom(startIndex=0){
   const range=Math.max(1,parseFloat(document.getElementById('evRange').value)||150);
   for(let i=Math.max(0,startIndex);i<app.rows.length;i++){
     const row=app.rows[i];
-    if(i===0){if(row.batteryStart==='')row.batteryStart='100';if(!row.startTime)row.startTime='08:00'}
-    else{const previous=app.rows[i-1],added=previous.charging?(parseFloat(previous.chargeAdded)||0):0;row.batteryStart=String(Math.round(clamp((parseFloat(previous.batteryEnd)||0)+added)*10)/10);row.startTime=previous.endTime||previous.startTime||row.startTime||'08:00'}
+    if(i===0){
+      if(row.batteryStart==='')row.batteryStart='100';
+      if(!row.startTime)row.startTime='08:00';
+    }else{
+      const previous=app.rows[i-1];
+      const prevEnd=parseFloat(previous.batteryEnd);
+      row.batteryStart=String(Math.round((Number.isFinite(prevEnd)?prevEnd:100)*10)/10);
+      row.startTime=previous.endTime||previous.startTime||row.startTime||'08:00';
+    }
     if(row.miles!=='')row.usage=String(Math.round(-((parseFloat(row.miles)||0)/range*100)*10)/10);
-    const duration=parseDuration(row.duration);if(row.startTime&&duration!=null)row.endTime=toHHMM(toMin(row.startTime)+duration);
-    const batteryEnd=(parseFloat(row.batteryStart)||0)+(parseUsage(row.usage)||0);row.batteryEnd=`${Math.round(batteryEnd*10)/10}%`;
+    const duration=parseDuration(row.duration);
+    if(row.startTime&&duration!=null)row.endTime=toHHMM(toMin(row.startTime)+duration);
+    const added=row.charging?(parseFloat(row.chargeAdded)||0):0;
+    const batteryEnd=(parseFloat(row.batteryStart)||0)+(parseUsage(row.usage)||0)+(added>0?added:0);
+    row.batteryEnd=`${Math.round(batteryEnd*10)/10}%`;
   }
 }
 async function calculate(){
