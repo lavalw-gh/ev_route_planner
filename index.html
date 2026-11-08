@@ -2,7 +2,11 @@
 <html lang="en" data-theme="light">
 <head>
 <!--
-  Version 5.8 changes:
+  Version 5.9 changes:
+  - Added custom labels for leg-end flags, updated live and saved/loaded with the route.
+  - Added optional miles and time beside route numbers in dark green italics; both default off.
+
+  Previous version 5.8 changes:
   - Added OSRM fallback route calculation when ORS fails or API key is unavailable.
   - Added warning message when toll avoidance is selected but fallback is used: "ORS Service not available therefore routes were calculated without tolls avoidance."
 
@@ -23,7 +27,7 @@
   - Numbered disconnected leg starts and linked them to the preceding endpoint with a dashed continuation line.
 -->
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>EV Route Planner 5.8 | Smart Route & Charging Optimizer</title>
+<title>EV Route Planner 5.9 | Smart Route & Charging Optimizer</title>
 <link href="https://api.fontshare.com/v2/css?f[]=general-sans@400,500,600,700&f[]=cabinet-grotesk@500,700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
 <style>
@@ -42,6 +46,10 @@
 .journey-flag.is-chequered .journey-flag__cloth,.legend-flag.is-chequered::before{background-color:#fff;background-image:conic-gradient(#222 25%,#fff 0 50%,#222 0 75%,#fff 0);background-size:8px 8px}.journey-flag.is-chequered .journey-flag__number{background:rgba(0,0,0,.6);border-radius:2px}
 /* 5.6: responsive alternatives comparison map and matching numbered choices. */
 #routeOptionsModal .box{width:min(1000px,96vw)}#routeOptionsMap{height:clamp(240px,40vh,440px);width:100%;border-radius:16px;background:var(--s2)}#routeOptionsList{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:12px}#routeOptionsList .opt{margin:0;width:100%;border-left:5px solid var(--route-color)}#routeOptionsList .opt.is-previewed{background:var(--pri2);outline:2px solid var(--route-color);outline-offset:1px}.alternative-number{display:inline-grid;place-items:center;background:var(--route-color);color:#fff;border:2px solid #fff;border-radius:999px;width:26px;height:26px;font:700 12px/1 var(--body);box-shadow:0 2px 5px #0005}.alternative-route-label{background:var(--s);color:var(--tx);border:2px solid var(--route-color);font-weight:700}.route-preview-note{margin:8px 0 0}
+/* 5.9: small, always-visible custom labels beside leg-end flags. */
+.leaflet-tooltip.custom-flag-label{background:#fff4b8;color:#26231c;border:1px solid #dbc974;padding:2px 5px;font:500 11px/1.3 var(--body);box-shadow:0 1px 3px #0002;pointer-events:none}.leaflet-tooltip-right.custom-flag-label::before{border-right-color:#dbc974}
+/* 5.9: optional leg metrics beside the route number, in dark green italics. */
+.leaflet-tooltip.route-leg-details{background:#d9f2d9;border:0;box-shadow:none;color:#006400;padding:0;font:italic 600 12px/1.3 var(--body);pointer-events:none}.leaflet-tooltip.route-leg-details::before{display:none}
 </style>
 </head>
 <body>
@@ -49,7 +57,7 @@
   <section class="panel left" id="inputPanel">
     <div class="hero">
       <div>
-        <h1>EV Route Planner 5.8</h1>
+        <h1>EV Route Planner 5.9</h1>
         <div class="mut">Car route and charging planner with ORS routing, independent road restrictions, route alternatives, and adjustable access points.</div>
       </div>
       <button class="theme" id="themeBtn" aria-label="Toggle theme">◐</button>
@@ -124,6 +132,16 @@
         </table>
       </div>
     </section>
+    <!-- 5.9: comma-separated leg-end labels; fixed three-row input before Notes. -->
+    <div style="margin-top: 15px;">
+      <label for="customFlagLabels" style="font-weight: bold; margin-bottom: 5px; display: block;">Custom labels for flags</label>
+      <textarea id="customFlagLabels" rows="3" placeholder="1. Home, 5. Break, 7. Fuel stop" style="width: 100%; padding: 8px; box-sizing: border-box; resize: none; overflow-y: auto; border: 1px solid var(--bd); border-radius: 4px; font-family: inherit; background: var(--bg); color: var(--tx);"></textarea>
+      <!-- 5.9: both optional route-number details are unticked by default. -->
+      <div class="selection-options">
+        <div class="toggle"><input id="displayMiles" type="checkbox"><label for="displayMiles">display miles</label></div>
+        <div class="toggle"><input id="displayTime" type="checkbox"><label for="displayTime">display time</label></div>
+      </div>
+    </div>
     <div style="margin-top: 15px;">
       <label for="routeNotes" style="font-weight: bold; margin-bottom: 5px; display: block;">Notes:</label>
       <textarea id="routeNotes" rows="10" placeholder="Enter your notes here..." style="width: 100%; padding: 8px; box-sizing: border-box; resize: vertical; overflow-y: auto; border: 1px solid var(--bd); border-radius: 4px; font-family: inherit; background: var(--bg); color: var(--tx);"></textarea>
@@ -713,9 +731,12 @@ function refreshMap({fit=true}={}){
     if(r.startResolved){
       let ll=[r.startResolved.lat,r.startResolved.lon];
       const routeCoordinates=flattenGeometryCoordinates(r.geometry);if(routeCoordinates.length){const middle=routeCoordinates[Math.floor(routeCoordinates.length/2)];ll=[middle[1],middle[0]]}
-      L.marker(ll,{icon:routeNumberIcon(i+1,'#437a22'),zIndexOffset:100})
+      const routeMarker=L.marker(ll,{icon:routeNumberIcon(i+1,'#437a22'),zIndexOffset:100})
         .addTo(app.markers)
         .bindPopup(`<strong>${i+1}. ${escapeHtml(r.start)}</strong><br>${escapeHtml(shortResolved(r.startResolved))}`);
+      // 5.9: show selected leg metrics next to the route number; retain the existing HH:MM duration.
+      const routeDetails=[];if(document.getElementById('displayMiles').checked&&r.miles!=='')routeDetails.push(`${r.miles} miles`);if(document.getElementById('displayTime').checked&&r.duration!=='')routeDetails.push(r.duration);
+      if(routeDetails.length)routeMarker.bindTooltip(escapeHtml(routeDetails.join(', ')),{permanent:true,direction:'right',offset:[10,0],className:'route-leg-details',opacity:1});
     }
     if(r.geometry){
       const routeColor=getComputedStyle(document.documentElement).getPropertyValue('--pri').trim()||'#01696f';
@@ -735,6 +756,8 @@ function refreshMap({fit=true}={}){
   const journeyStops=[];journeyOccurrences.forEach(point=>{const previous=journeyStops[journeyStops.length-1];if(previous&&sameJourneyPlace(previous,point)){if(point.routeNumber!=null&&point.endpoint==='end'){previous.routeNumber=point.routeNumber;previous.rowId=point.rowId;previous.endpoint=point.endpoint;previous.label=point.label;previous.place=point.place}if((point.snapM||0)>(previous.snapM||0)){previous.snapM=point.snapM;previous.snapPoint=point.snapPoint}return}journeyStops.push({...point})});
   // 5.5: charging colours use the arrival leg; start and finish get their own flag designs.
   const flags=journeyStops.map((point,index)=>{const rowForFlag=app.rows.find(row=>row.id===point.rowId),isFirst=index===0,isLast=index===journeyStops.length-1,chargingStop=point.endpoint==='end'&&rowForFlag?.charging;return {...point,routeNumber:isFirst?null:point.routeNumber,color:isFirst?'#2e9d45':chargingStop?'#f28c28':'#2563eb',chequered:isLast,role:isFirst?'Start':isLast?'Finish':chargingStop?'Charging stop':point.endpoint==='start'?'Continuation start':'Leg end (no charging)'}});
+  // 5.9: parse numbered labels once per refresh; ignore incomplete entries while typing.
+  const customFlagLabels=new Map();document.getElementById('customFlagLabels').value.split(',').forEach(entry=>{const match=entry.trim().match(/^(\d+)\.\s*(.+)$/);if(match&&match[2].trim())customFlagLabels.set(Number(match[1]),match[2].trim())});
   const repeatedLocations=new Map();
   flags.forEach(point=>{
     const key=journeyLocationKey(point),group=repeatedLocations.get(key)||{count:0,place:point.place},repeatIndex=group.count++;repeatedLocations.set(key,group);
@@ -744,6 +767,8 @@ function refreshMap({fit=true}={}){
     const marker=L.marker(ll,{icon:journeyFlagIcon(point.color,point.routeNumber,inverted,pairOffset,point.chequered),zIndexOffset:400+repeatIndex,draggable:true})
       .addTo(app.markers)
       .bindPopup(`<strong>${point.role}${repeatIndex?` · pass ${repeatIndex+1}`:''}</strong><br>${escapeHtml(point.label)}<br><span class="mini">${escapeHtml(shortResolved(point.place))}</span>${warning}<br><span class="mini">Drag this flag to correct the vehicle access point.</span>`);
+    // 5.9: escape label text and keep repeated/inverted flag labels upright.
+    if(point.endpoint==='end'&&customFlagLabels.has(point.routeNumber))marker.bindTooltip(escapeHtml(customFlagLabels.get(point.routeNumber)),{permanent:true,direction:'right',offset:[inverted?0:24,inverted?20:-28],className:'custom-flag-label',opacity:1});
     marker.on('dragend',event=>moveAccessPoint(point,event.target.getLatLng()));
     if(point.snapM>100&&point.snapPoint){const snapped=[point.snapPoint.lat,point.snapPoint.lon];bounds.push(snapped);L.polyline([ll,snapped],{color:getComputedStyle(document.documentElement).getPropertyValue('--warn').trim()||'#a95e1e',weight:3,opacity:.8,dashArray:'5 6'}).addTo(app.markers)}
   });
@@ -755,13 +780,18 @@ function routeSaveFilename(inputName){
   const stem=String(inputName||'').trim().replace(/\.json$/i,'')||`ev-route-${new Date().toISOString().slice(0,19).replace(/[T:]/g,'-')}`;
   return `${/^EV-Charger-/i.test(stem)?stem:`EV-Charger-${stem}`}.json`;
 }
+// 5.9: save custom flag labels with route settings (older files load with no custom labels).
 function exportRoute(){
-  const payload={version:'5.8',savedAt:new Date().toISOString(),settings:{evRange:document.getElementById('evRange').value,useMapTiler:document.getElementById('useMapTiler').checked,avoidTolls:document.getElementById('avoidTolls').checked,avoidFerries:document.getElementById('avoidFerries').checked,routePreference:routePreference(),showAlternatives:document.getElementById('showAlternatives').checked,notes:document.getElementById('routeNotes').value},rows:app.rows.map(r=>({start:r.start,end:r.end,charging:r.charging,chargeAdded:r.charging?r.chargeAdded:'',miles:r.miles,duration:r.duration,startTime:r.startTime,endTime:r.endTime,batteryStart:r.batteryStart,usage:r.usage,batteryEnd:r.batteryEnd,startResolved:r.startResolved,endResolved:r.endResolved,geometry:r.geometry,startSnapM:r.startSnapM,endSnapM:r.endSnapM,startSnapPoint:r.startSnapPoint,endSnapPoint:r.endSnapPoint,viaPoints:r.viaPoints,routeWayPoints:r.routeWayPoints,routeRestrictions:r.routeRestrictions,routeWarnings:r.routeWarnings}))};
+  const payload={version:'5.9',savedAt:new Date().toISOString(),settings:{evRange:document.getElementById('evRange').value,useMapTiler:document.getElementById('useMapTiler').checked,avoidTolls:document.getElementById('avoidTolls').checked,avoidFerries:document.getElementById('avoidFerries').checked,routePreference:routePreference(),showAlternatives:document.getElementById('showAlternatives').checked,notes:document.getElementById('routeNotes').value,customFlagLabels:document.getElementById('customFlagLabels').value,displayMiles:document.getElementById('displayMiles').checked,displayTime:document.getElementById('displayTime').checked},rows:app.rows.map(r=>({start:r.start,end:r.end,charging:r.charging,chargeAdded:r.charging?r.chargeAdded:'',miles:r.miles,duration:r.duration,startTime:r.startTime,endTime:r.endTime,batteryStart:r.batteryStart,usage:r.usage,batteryEnd:r.batteryEnd,startResolved:r.startResolved,endResolved:r.endResolved,geometry:r.geometry,startSnapM:r.startSnapM,endSnapM:r.endSnapM,startSnapPoint:r.startSnapPoint,endSnapPoint:r.endSnapPoint,viaPoints:r.viaPoints,routeWayPoints:r.routeWayPoints,routeRestrictions:r.routeRestrictions,routeWarnings:r.routeWarnings}))};
   const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}),a=document.createElement('a'),filename=routeSaveFilename(document.getElementById('saveFilename').value);
   a.href=URL.createObjectURL(blob);a.download=filename;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},0);setStatus('Route saved without API keys');
 }
 function syncEvPreset(){const evRange=document.getElementById('evRange'),evPreset=document.getElementById('evPreset'),match=[...evPreset.options].find(o=>o.value===evRange.value&&o.value!=='other');if(match){evPreset.value=match.value;evRange.readOnly=true}else{evPreset.value='other';evRange.readOnly=false}}
-function importRoute(file){if(!file)return;const reader=new FileReader();reader.onload=()=>{try{const data=JSON.parse(reader.result);if(!data||!Array.isArray(data.rows))throw new Error('Invalid route file');app.rerouteTokens.clear();document.getElementById('saveFilename').value=file.name.replace(/\.json$/i,'');document.getElementById('evRange').value=data.settings?.evRange??document.getElementById('evRange').value;syncEvPreset();document.getElementById('useMapTiler').checked=!!data.settings?.useMapTiler;document.getElementById('avoidTolls').checked=!!data.settings?.avoidTolls;document.getElementById('avoidFerries').checked=!!data.settings?.avoidFerries;document.getElementById('showAlternatives').checked=!!data.settings?.showAlternatives;const preference=data.settings?.routePreference==='shortest'?'shortest':'fastest';document.querySelector(`input[name="routePreference"][value="${preference}"]`).checked=true;document.getElementById('routeNotes').value=data.settings?.notes??'';app.rows=data.rows.map(r=>createRow(r));if(!app.rows.length)addRow({startTime:'08:00',batteryStart:'100'});updateMapProvider(false);render();refreshMap();setStatus('Route and settings loaded · shaping points restored · API keys were not imported')}catch(err){alert(err.message||'Could not load route file');setStatus('Load failed','error')}};reader.readAsText(file)}
+function importRoute(file){if(!file)return;const reader=new FileReader();reader.onload=()=>{try{const data=JSON.parse(reader.result);if(!data||!Array.isArray(data.rows))throw new Error('Invalid route file');app.rerouteTokens.clear();document.getElementById('saveFilename').value=file.name.replace(/\.json$/i,'');document.getElementById('evRange').value=data.settings?.evRange??document.getElementById('evRange').value;syncEvPreset();document.getElementById('useMapTiler').checked=!!data.settings?.useMapTiler;document.getElementById('avoidTolls').checked=!!data.settings?.avoidTolls;document.getElementById('avoidFerries').checked=!!data.settings?.avoidFerries;document.getElementById('showAlternatives').checked=!!data.settings?.showAlternatives;const preference=data.settings?.routePreference==='shortest'?'shortest':'fastest';document.querySelector(`input[name="routePreference"][value="${preference}"]`).checked=true;document.getElementById('routeNotes').value=data.settings?.notes??'';document.getElementById('customFlagLabels').value=data.settings?.customFlagLabels??'';document.getElementById('displayMiles').checked=!!data.settings?.displayMiles;document.getElementById('displayTime').checked=!!data.settings?.displayTime;app.rows=data.rows.map(r=>createRow(r));if(!app.rows.length)addRow({startTime:'08:00',batteryStart:'100'});updateMapProvider(false);render();refreshMap();setStatus('Route and settings loaded · shaping points restored · API keys were not imported')}catch(err){alert(err.message||'Could not load route file');setStatus('Load failed','error')}};reader.readAsText(file)}
+// 5.9: update labels immediately without changing the current map view or recalculating routes.
+document.getElementById('customFlagLabels').addEventListener('input',()=>refreshMap({fit:false}));
+// 5.9: toggle leg metrics immediately without refitting or recalculating the route.
+['displayMiles','displayTime'].forEach(id=>document.getElementById(id).addEventListener('change',()=>refreshMap({fit:false})));
 document.getElementById('calcBtn').onclick=calculate;document.getElementById('addBtn').onclick=()=>addRow();document.getElementById('saveBtn').onclick=exportRoute;document.getElementById('loadBtn').onclick=()=>document.getElementById('routeFileInput').click();document.getElementById('routeFileInput').addEventListener('change',e=>{importRoute(e.target.files[0]);e.target.value=''});
 document.getElementById('apiFileBtn').onclick=()=>document.getElementById('apiFileInput').click();
 document.getElementById('apiFileInput').addEventListener('change',e=>{importApiFile(e.target.files[0]);e.target.value=''});
