@@ -17,7 +17,7 @@
 
   Previous version 5.5 changes:
   - Green start, orange charging stop, blue non-charging leg end, and chequered final flags.
-  - Saved JSON filenames always use one EV-Charger- prefix.
+  - Saved JSON filenames always use one EV-Planner- prefix.
 
   Previous version 4.4 changes:
   - Added draggable route shaping points with strict 25 m road snapping and immediate rerouting on release.
@@ -775,10 +775,10 @@ function refreshMap({fit=true}={}){
   if(fit&&bounds.length)app.map.fitBounds(bounds,{padding:[30,30]});
 }
 // 4.4: shaping points and route metadata are first-class saved-route data.
-// 5.5: add the EV-Charger- prefix once and keep a single JSON extension.
+// 5.5: add the EV-Planner- prefix once and keep a single JSON extension.
 function routeSaveFilename(inputName){
   const stem=String(inputName||'').trim().replace(/\.json$/i,'')||`ev-route-${new Date().toISOString().slice(0,19).replace(/[T:]/g,'-')}`;
-  return `${/^EV-Charger-/i.test(stem)?stem:`EV-Charger-${stem}`}.json`;
+  return `${/^EV-Planner-/i.test(stem)?stem:`EV-Planner-${stem}`}.json`;
 }
 // 5.9: save custom flag labels with route settings (older files load with no custom labels).
 function exportRoute(){
